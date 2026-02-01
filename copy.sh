@@ -2,7 +2,7 @@
 
 debug=1 # debug mode records logs
 mock=1 # mock mode does not do any file operations 
-bar_size=80
+bar_size=$(( $(tput cols) -  10 ))
 bar_char_done="|"
 bar_char_todo="-"
 bar_percentage_scale=2
@@ -14,19 +14,43 @@ declare -A file_table
 declare -i bytes=0
 declare -i count=0
 declare -i total_bytes=0
+declare -i diff=0
+declare -i term_size=0
+declare -i prev_msg_height=0
+declare -i next_msg_height=0
+
 
 print_msg() {
-    # if [[ ${#msg} -ge $( tput cols ) ]]; then 
-    #     echo ""
-    # fi
-    tput el1  && tput hpa 0 && tput el
     msg=$1
-    echo "$msg" | tee >(cat >&1) >>$logs
-    # if [[ ${#msg} -ge $( tput cols ) ]]; then 
-    #     echo ""
-    # fi
-    tput cuu1
-    echo -ne "$2" 
+    term_size=$( tput cols )
+    next_msg_height=$(( ${#msg} / $term_size ))
+
+     
+    tput hpa 0 
+    # erase the previous message
+    for ((x=0; x<$prev_msg_height + 1 ; x++ )); do
+        tput cuu1 && tput el  
+    done
+    
+    if [ $next_msg_height -gt $prev_msg_height ]; then 
+        diff=$(( $next_msg_height - $prev_msg_height ))
+        
+        tput indn $diff
+        tput cuu $diff
+        tput il $diff
+    elif [ $prev_msg_height -gt $next_msg_height ]; then 
+        diff=$(( $prev_msg_height - $next_msg_height ))
+        tput dl $diff 
+        tput rin $diff 
+        tput cud $diff
+    fi 
+
+    echo -e "$msg" | tee >(cat >&1) >>$logs
+    prev_msg_height=$next_msg_height
+    for ((x=0; x<$prev_msg_height + 1; x++ )); do 
+        echo -ne "$2" 
+    done
+    
 }
 
 show_progress() {
@@ -37,8 +61,9 @@ show_progress() {
     todo=$(bc <<< "scale=0; $bar_size - $done" )
     done_sub_bar=$(printf "%${done}s" | tr " " "${bar_char_done}")
     todo_sub_bar=$(printf "%${todo}s" | tr " " "${bar_char_todo}")
-    echo -ne "\n[${done_sub_bar}${todo_sub_bar}] ${percent}%"
-    tput cuu1
+    echo -n "[${done_sub_bar}${todo_sub_bar}] ${percent}%"
+    tput hpa 0
+    
 }
 
 verify() {
@@ -54,7 +79,7 @@ verify() {
 }
 
 m_mkdir() {
-    print_msg "Creating directory: $1" 
+    print_msg "Creating directories: $1" 
     if [ $mock = 0 ]; then mkdir "$1"; fi
 }
 
@@ -74,7 +99,9 @@ if [[ $debug = 1 ]]; then
     touch "$logs" &&  echo "logging start" > "$logs"
 fi
 
-print_msg "=Processing top level arguments=" "\n"
+echo -ne "\n"
+print_msg "=Processing top level arguments=" "\n" 
+
 
 for ((i=1; i<$#; i++)); do
     real=($( realpath "${!i}" ))
@@ -82,10 +109,10 @@ for ((i=1; i<$#; i++)); do
     # echo "${fields[@]}" | cat -et
     for item in "${real[@]}"; do 
         if [[ -d "$item" ]]; then 
-            print_msg "\r$item is a directory"
+            print_msg "$item is a directory"
             dir_table["$item"]="$dest"
         elif [[ -f "$item" ]]; then 
-            print_msg "\r$item is a file"
+            print_msg "$item is a file" 
             file_table["$item"]="$dest"
             countbytes $item
         elif [[ -h "$item" ]]; then 
@@ -117,16 +144,21 @@ while [[ ${#dir_table[@]} -ne 0 ]]; do
     count+=${#dir_table[@]}
 done
 
+print_msg "Creating directories: done" "\n"
+
 print_msg "=Copying files=" "\n" 
 total_bytes=$bytes
 bytes=0
 show_progress $bytes $total_bytes
 
+
 for key in "${!file_table[@]}"; do 
     # echo "copying $key to ${file_table[$key]}"
     filename="${key##*/}" #get filename
     newfile="${file_table[$key]}/$filename"
+
     if [[ -e "$newfile" ]]; then
+        # show_progress $bytes $total_bytes
         print_msg "$filename already exists at $newfile" "\n"
         verify "$key" "$newfile"
         # original=($( md5sum "$key" ))
@@ -136,6 +168,7 @@ for key in "${!file_table[@]}"; do
             print_msg "$newfile is different than $key" "\n"
         fi
     else
+        # show_progress $bytes $total_bytes
         m_cp "$key" "${file_table[$key]}"
     fi
     countbytes $key
@@ -144,23 +177,35 @@ for key in "${!file_table[@]}"; do
     file_table["$key"]="$newfile"
 
 done
-tput hpa 0 && tput cuu1 && tput el
-echo -n "=copying complete="
-echo -e "\n"
+
+#TODO NEXT TIME START HERE
+# tput hpa 0 && tput cuu1 && tput el
+print_msg "Copying: complete"
+tput hpa $( tput cols )
+echo -ne "\n\n"
 print_msg "=Verifying copies=" "\n"
+bytes=0
+show_progress $bytes $total_bytes
+
 
 for key in "${!file_table[@]}"; do 
     # echo "verifying: ${file_table[$key]}"
+
     verify "$key" "${file_table[$key]}"
     if [[ $? -ne 0 ]]; then 
         # rm "${file_table[$key]}"
         print_msg "$key did not copy correctly" "\n"
     fi
+    countbytes $key
+    show_progress $bytes $total_bytes
 done
 
+print_msg "Verifying: Done"
+tput hpa $( tput cols )
+echo -ne "\n\n"
 count+=${#file_table[@]}
 
-print_msg "$count items processed" "\n"
+print_msg "$count items processed" 
 
 
 
