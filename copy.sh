@@ -118,7 +118,7 @@ for ((i=1; i<$#; i++)); do
         elif [[ -f "$item" ]]; then 
             print_msg "$item is a file" 
             file_table["$item"]="$dest"
-            countbytes $item
+            countbytes "$item"
         elif [[ -h "$item" ]]; then 
             print_msg "$item is a symbolic link, not copied" "\n"
         fi 
@@ -136,7 +136,7 @@ while [[ ${#dir_table[@]} -ne 0 ]]; do
         for item in "$key"/*; do 
             if [[ -f "$item" ]]; then 
                 file_table["$item"]="$dest"
-                countbytes $item
+                countbytes "$item"
             elif [[ -d "$item" ]]; then 
                 dir_table["$item"]="$dest"
             elif [[ -h "$item" ]]; then
@@ -169,7 +169,7 @@ for key in "${!file_table[@]}"; do
     else
         m_cp "$key" "${file_table[$key]}"
     fi
-    countbytes $key
+    countbytes "$key"
     show_progress $bytes $total_bytes
     
     file_table["$key"]="$newfile"
@@ -190,7 +190,7 @@ for key in "${!file_table[@]}"; do
         # rm "${file_table[$key]}"
         print_msg "$key did not copy correctly" "\n"
     fi
-    countbytes $key
+    countbytes "$key"
     show_progress $bytes $total_bytes
 done
 
