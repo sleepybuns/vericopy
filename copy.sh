@@ -1,7 +1,7 @@
 #!/bin/bash
 
 debug=1 # debug mode records logs
-mock=1 # mock mode does not do any file operations 
+mock=0 # mock mode does not do any file operations 
 bar_size=$(( $(tput cols) -  10 ))
 bar_char_done="|"
 bar_char_todo="-"
