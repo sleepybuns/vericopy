@@ -25,16 +25,13 @@ print_msg() {
     term_size=$( tput cols )
     next_msg_height=$(( ${#msg} / $term_size ))
 
-     
     tput hpa 0 
     # erase the previous message
     for ((x=0; x<$prev_msg_height + 1 ; x++ )); do
         tput cuu1 && tput el  
     done
-    
     if [ $next_msg_height -gt $prev_msg_height ]; then 
         diff=$(( $next_msg_height - $prev_msg_height ))
-        
         tput indn $diff
         tput cuu $diff
         tput il $diff
@@ -44,12 +41,21 @@ print_msg() {
         tput rin $diff 
         tput cud $diff
     fi 
-
     echo -e "$msg" | tee >(cat >&1) >>$logs
     prev_msg_height=$next_msg_height
     for ((x=0; x<$prev_msg_height + 1; x++ )); do 
         echo -ne "$2" 
     done
+
+    # if [[ -n $2 ]]; then 
+    #     for ((x=0; x<$prev_msg_height + 1; x++ )); do 
+    #         sleep 1
+    #         tput indn 1
+    #         tput cuu 1
+    #         tput il 1 
+    #         tput cud 1
+    #     done
+    # fi
     
 }
 
@@ -63,13 +69,11 @@ show_progress() {
     todo_sub_bar=$(printf "%${todo}s" | tr " " "${bar_char_todo}")
     echo -n "[${done_sub_bar}${todo_sub_bar}] ${percent}%"
     tput hpa 0
-    
 }
 
 verify() {
     print_msg "Verifying: $2" 
     og=($( md5sum "$1" ))
-    # echo "${og[@]}"
     if [ $mock = 0 ]; then 
         yg=($( md5sum "$2" ))
         cmp -s <( printf ${og[0]} ) <( printf ${yg[0]} )
@@ -80,7 +84,7 @@ verify() {
 
 m_mkdir() {
     print_msg "Creating directories: $1" 
-    if [ $mock = 0 ]; then mkdir "$1"; fi
+    if [ $mock = 0 ]; then mkdir "$1" 2>$logs; fi
 }
 
 m_cp() {
@@ -153,22 +157,16 @@ show_progress $bytes $total_bytes
 
 
 for key in "${!file_table[@]}"; do 
-    # echo "copying $key to ${file_table[$key]}"
     filename="${key##*/}" #get filename
     newfile="${file_table[$key]}/$filename"
 
     if [[ -e "$newfile" ]]; then
-        # show_progress $bytes $total_bytes
         print_msg "$filename already exists at $newfile" "\n"
         verify "$key" "$newfile"
-        # original=($( md5sum "$key" ))
-        # check=($( md5sum "$newfile" ))
-        # cmp -s <( printf ${original[0]} ) <( printf ${check[0]} )
         if [[ $? -ne 0 ]]; then 
             print_msg "$newfile is different than $key" "\n"
         fi
     else
-        # show_progress $bytes $total_bytes
         m_cp "$key" "${file_table[$key]}"
     fi
     countbytes $key
@@ -178,8 +176,6 @@ for key in "${!file_table[@]}"; do
 
 done
 
-#TODO NEXT TIME START HERE
-# tput hpa 0 && tput cuu1 && tput el
 print_msg "Copying: complete"
 tput hpa $( tput cols )
 echo -ne "\n\n"
@@ -189,8 +185,6 @@ show_progress $bytes $total_bytes
 
 
 for key in "${!file_table[@]}"; do 
-    # echo "verifying: ${file_table[$key]}"
-
     verify "$key" "${file_table[$key]}"
     if [[ $? -ne 0 ]]; then 
         # rm "${file_table[$key]}"
