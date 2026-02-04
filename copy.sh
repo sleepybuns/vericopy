@@ -190,7 +190,7 @@ for key in "${!file_table[@]}"; do
         fi
     else
         m_cp "$key" "${file_table[$key]}"
-        sync $newfile
+        sync "$newfile"
     fi
     countbytes "$key"
     show_progress $bytes $total_bytes
