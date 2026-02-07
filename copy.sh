@@ -7,16 +7,19 @@ bar_char_done="|"
 bar_char_todo="-"
 bar_percentage_scale=2
 
-dest=$( realpath "${!#}" )
 logs="/dev/null"
+dest=""
 declare -A dir_table
 declare -A file_table
+declare -A bad_copies
+declare -A diff_copies
 declare -i bytes=0
-declare -i count=0
-declare -i total_bytes=0
+declare -i item_count=0
+declare -i copy_bytes=1 #prevent divide by zero 
+declare -i verify_bytes
 declare -i diff=0
 declare -i total_cols=0
-declare -i prev_msg_height=0
+# declare -i prev_msg_height=0
 declare -i next_msg_height=0
 declare -i total_rows=0
 declare -i curr_row=0
@@ -28,11 +31,7 @@ print_msg() {
     next_msg_height=$(( ${#msg} / $total_cols ))
 
     tput hpa 0 
-    # # erase the previous message
-    # for ((x=0; x<$prev_msg_height + 1 ; x++ )); do
-    #     tput cuu1 && tput el  
-    # done
-
+    
     # read '\e[6n' as a prompt it prints ESC[row;col]R (displayed as '^[[17;1R') 
     # read until delimiter 'R' then put in array 'pos'. 
     # -r ignore backslash as escape character
@@ -49,33 +48,7 @@ print_msg() {
         tput cuu $diff
     fi
     tput il $(( $next_msg_height + 1 ))
-
-    # if [ $next_msg_height -gt $prev_msg_height ]; then 
-    #     diff=$(( $next_msg_height - $prev_msg_height ))
-    #     tput indn $diff
-    #     tput cuu $diff
-    #     tput il $diff
-    # elif [ $prev_msg_height -gt $next_msg_height ]; then 
-    #     diff=$(( $prev_msg_height - $next_msg_height ))
-    #     tput dl $diff 
-    #     tput rin $diff 
-    #     tput cud $diff
-    # fi 
     echo -e "$msg" | tee >(cat >&1) >>$logs
-    prev_msg_height=$next_msg_height
-    # for ((x=0; x<$prev_msg_height + 1; x++ )); do 
-    #     echo -ne "$2" 
-    # done
-
-    # if [[ -n $2 ]]; then 
-    #     for ((x=0; x<$prev_msg_height + 1; x++ )); do 
-    #         sleep 1
-    #         tput indn 1
-    #         tput cuu 1
-    #         tput il 1 
-    #         tput cud 1
-    #     done
-    # fi
     sleep 0.2    
 }
 
@@ -115,9 +88,13 @@ m_cp() {
     fi
 }
 
+# $1: file name 
+# $2: variable name, literal (no $) 
+# $3: operation +,- etc. 
 countbytes() {
     num=($( du -sb "$1" ))
-    bytes+=${num[0]}
+    eval "$2=$(( $2 $3 ${num[0]} ))"
+    # bytes+=${num[0]}
 }
 
 if [[ $debug == 1 ]]; then
@@ -126,25 +103,34 @@ if [[ $debug == 1 ]]; then
     touch "$logs" &&  echo "logging start" > "$logs"
 fi
 
+if [[ -d "${!#}" ]]; then 
+    dest=$( realpath "${!#}" )
+else 
+    print_msg "${!#} is not a directory. Goodbye."
+    exit 
+fi
+    
 print_msg "=Processing top level arguments=" 
 
-
 for ((i=1; i<$#; i++)); do
-    real=($( realpath "${!i}" ))
+    item=($( realpath "${!i}" ))
     # mapfile -d \/ fields <<< $real
     # echo "${fields[@]}" | cat -et
-    for item in "${real[@]}"; do 
-        if [[ -d "$item" ]]; then 
-            print_msg "$item is a directory"
-            dir_table["$item"]="$dest"
-        elif [[ -f "$item" ]]; then 
-            print_msg "$item is a file" 
-            file_table["$item"]="$dest"
-            countbytes "$item"
-        elif [[ -h "$item" ]]; then 
-            print_msg "$item is a symbolic link, not copied" 
-        fi 
-    done
+    # for item in "${real[@]}"; do 
+    if [[ -d "$item" ]]; then 
+        print_msg "$item is a directory"
+        dir_table["$item"]="$dest"
+    elif [[ -f "$item" ]]; then 
+        print_msg "$item is a file" 
+        file_table["$item"]="$dest"
+        countbytes "$item" copy_bytes +
+    elif [[ -h "$item" ]]; then 
+        print_msg "$item is a symbolic link, not copied" 
+    else 
+        print_msg "$item is neither file nor directory, skipped" 
+    fi 
+    item_count+=1
+    # done
 done
 
 print_msg "=Building directories=" 
@@ -153,29 +139,31 @@ while [[ ${#dir_table[@]} -ne 0 ]]; do
 
     for key in "${!dir_table[@]}"; do 
         dirname="${key##*/}"
-        dest="${dir_table[$key]}/$dirname"
-        m_mkdir "$dest" 
-        for item in "$key"/*; do 
+        dirname="${dir_table[$key]}/$dirname"
+        m_mkdir "$dirname" 
+        for item in "$key"/{,.}*; do 
             if [[ -f "$item" ]]; then 
-                file_table["$item"]="$dest"
-                countbytes "$item"
+                file_table["$item"]="$dirname"
+                countbytes "$item" copy_bytes +
             elif [[ -d "$item" ]]; then 
-                dir_table["$item"]="$dest"
+                dir_table["$item"]="$dirname"
             elif [[ -h "$item" ]]; then
                 print_msg "$item is a symbolic link, not copied" 
             fi
         done
         unset dir_table["$key"]
     done
-    count+=${#dir_table[@]}
+    item_count+=${#dir_table[@]}
 done
 
 print_msg "Creating directories: done" 
+item_count+=${#file_table[@]}
+
 
 print_msg "=Copying files="
-total_bytes=$bytes
+verify_bytes=$copy_bytes
 bytes=0
-show_progress $bytes $total_bytes
+show_progress $bytes $copy_bytes
 
 
 for key in "${!file_table[@]}"; do 
@@ -186,25 +174,29 @@ for key in "${!file_table[@]}"; do
         print_msg "$filename already exists at $newfile" 
         verify "$key" "$newfile"
         if [[ $? -ne 0 ]]; then 
-            print_msg "$newfile is different than $key" 
+            print_msg "$newfile is different than $key"
+            diff_copies["$newfile"]="$key" 
         fi
+        unset file_table["$key"]
+        countbytes "$key" verify_bytes -
     else
         m_cp "$key" "${file_table[$key]}"
+        file_table["$key"]="$newfile"
     fi
-    countbytes "$key"
-    show_progress $bytes $total_bytes
-    
-    file_table["$key"]="$newfile"
+    countbytes "$key" bytes +
+    show_progress $bytes $copy_bytes
 
 done
 
-sync $dest
+sync "$dest"
+bytes+=1
+show_progress $bytes $copy_bytes
 print_msg "Copying: complete"
 tput hpa $( tput cols )
 echo -ne "\n"
 print_msg "=Verifying copies=" 
 bytes=0
-show_progress $bytes $total_bytes
+show_progress $bytes $verify_bytes
 
 
 for key in "${!file_table[@]}"; do 
@@ -212,18 +204,27 @@ for key in "${!file_table[@]}"; do
     if [[ $? -ne 0 ]]; then 
         # rm "${file_table[$key]}"
         print_msg "$key did not copy correctly" 
+        bad_copies["$key"]=${file_table[$key]}
     fi
-    countbytes "$key"
-    show_progress $bytes $total_bytes
+    countbytes "$key" bytes +
+    show_progress $bytes $verify_bytes
 done
 
+bytes+=1
+show_progress $bytes $verify_bytes
 print_msg "Verifying: Done"
 tput hpa $( tput cols )
 echo -ne "\n"
-count+=${#file_table[@]}
 
-print_msg "$count items processed" 
+print_msg "$item_count items processed" 
 
+for key in "${!bad_copies[@]}"; do 
+    print_msg "$key did not copy correctly to ${bad_copies[$key]}"
+done 
+
+for key in "${!diff_copies[@]}"; do 
+    print_msg "$key already exists and is different from ${diff_copies[$key]}"
+done 
 
 
 
