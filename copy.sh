@@ -2,7 +2,7 @@
 
 debug=1 # debug mode records logs
 mock=0 # mock mode does not do any file operations 
-bar_size=$(( $(tput cols) -  10 ))
+# bar_size=$(( $(tput cols) -  10 ))
 bar_char_done="|"
 bar_char_todo="-"
 bar_percentage_scale=2
@@ -31,7 +31,7 @@ print_msg() {
     next_msg_height=$(( ${#msg} / $total_cols ))
 
     tput hpa 0 
-    
+
     # read '\e[6n' as a prompt it prints ESC[row;col]R (displayed as '^[[17;1R') 
     # read until delimiter 'R' then put in array 'pos'. 
     # -r ignore backslash as escape character
@@ -55,6 +55,7 @@ print_msg() {
 show_progress() {
     current="$1"
     total="$2"
+    bar_size=$(( $(tput cols) -  10 ))
     percent=$(bc <<< "scale=$bar_percentage_scale; 100 * $current / $total" )
     done=$(bc <<< "scale=0; $bar_size * $percent / 100" )
     todo=$(bc <<< "scale=0; $bar_size - $done" )
